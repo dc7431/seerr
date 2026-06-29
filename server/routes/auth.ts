@@ -315,6 +315,11 @@ async function tryAutoLinkJellyfinUser(
       email: user.email,
       preferredUsername: preferredUsername ?? null,
       jellyfinUserCount: users.length,
+    });
+    // The full username list is only emitted at debug level to aid diagnosing a
+    // no-match without dumping every Jellyfin username into the default logs.
+    logger.debug('Jellyfin usernames available for auto-link matching', {
+      label: AUTO_LINK_LABEL,
       jellyfinUsernames: users.map((u) => u.Name),
     });
 
