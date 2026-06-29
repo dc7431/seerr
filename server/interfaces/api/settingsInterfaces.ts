@@ -35,6 +35,7 @@ export interface PublicSettingsResponse {
   hideRequested: boolean;
   localLogin: boolean;
   mediaServerLogin: boolean;
+  hideLocalLoginUI: boolean;
   movie4kEnabled: boolean;
   series4kEnabled: boolean;
   discoverRegion: string;

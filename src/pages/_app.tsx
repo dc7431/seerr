@@ -249,6 +249,7 @@ CoreApp.getInitialProps = async (initialProps) => {
     series4kEnabled: false,
     localLogin: true,
     mediaServerLogin: true,
+    hideLocalLoginUI: false,
     discoverRegion: '',
     streamingRegion: '',
     originalLanguage: '',
