@@ -15,6 +15,7 @@ import { checkAvatarChanged } from '@server/routes/avatarproxy';
 import { ApiError } from '@server/types/error';
 import { getAppVersion } from '@server/utils/appVersion';
 import { getHostname } from '@server/utils/getHostname';
+import { matchJellyfinUser } from '@server/utils/jellyfin';
 import axios from 'axios';
 import { Router, type Request } from 'express';
 import gravatarUrl from 'gravatar-url';
@@ -224,6 +225,112 @@ authRoutes.post('/plex', async (req, res, next) => {
 
 function getUserAvatarUrl(user: User): string {
   return `/avatarproxy/${user.jellyfinUserId}?v=${user.avatarVersion}`;
+}
+
+/**
+ * Best-effort: link a freshly-created OIDC user to an existing Jellyfin/Emby
+ * account by matching the OIDC `preferred_username` claim against the Jellyfin
+ * account name, populating the Jellyfin association fields on `user` in place.
+ *
+ * Uses Seerr's stored admin Jellyfin API key, so no per-user Jellyfin password
+ * or token is required (the linked user therefore has no `jellyfinAuthToken`,
+ * matching the standard non-admin Jellyfin login path). Any failure or absent
+ * match leaves `user` untouched so the OIDC sign-up still succeeds as a local
+ * account. See `matchJellyfinUser` for the (username-only) security model.
+ */
+async function tryAutoLinkJellyfinUser(
+  user: User,
+  fullUserInfo: openIdClient.IDToken & openIdClient.UserInfoResponse
+): Promise<void> {
+  const settings = getSettings();
+
+  // Only meaningful when the configured media server is Jellyfin/Emby, which is
+  // also the only case where settings.jellyfin.apiKey is populated.
+  if (
+    settings.main.mediaServerType !== MediaServerType.JELLYFIN &&
+    settings.main.mediaServerType !== MediaServerType.EMBY
+  ) {
+    return;
+  }
+
+  if (!settings.jellyfin.apiKey) {
+    return;
+  }
+
+  try {
+    const userRepository = getRepository(User);
+    const admin = await userRepository.findOne({
+      where: { id: 1 },
+      select: ['id', 'jellyfinDeviceId', 'jellyfinUserId'],
+      order: { id: 'ASC' },
+    });
+
+    const jellyfinClient = new JellyfinAPI(
+      getHostname(),
+      settings.jellyfin.apiKey,
+      admin?.jellyfinDeviceId ?? ''
+    );
+    jellyfinClient.setUserId(admin?.jellyfinUserId ?? '');
+
+    const { users } = await jellyfinClient.getUsers();
+
+    const match = matchJellyfinUser(users, {
+      preferredUsername: fullUserInfo.preferred_username,
+      email: fullUserInfo.email,
+    });
+
+    if (match.status !== 'matched') {
+      if (match.status === 'ambiguous') {
+        logger.warn(
+          'Skipped OIDC Jellyfin auto-link: multiple Jellyfin users matched the username',
+          { label: 'Auth', email: user.email, matches: match.count }
+        );
+      }
+      return;
+    }
+
+    const matchedUser = match.user;
+
+    // Never hijack a Jellyfin account already linked to another Seerr user.
+    if (
+      await userRepository.exist({
+        where: { jellyfinUserId: matchedUser.Id },
+      })
+    ) {
+      logger.warn(
+        'Skipped OIDC Jellyfin auto-link: Jellyfin account is already linked to another Seerr user',
+        {
+          label: 'Auth',
+          email: user.email,
+          jellyfinUsername: matchedUser.Name,
+        }
+      );
+      return;
+    }
+
+    user.userType =
+      settings.main.mediaServerType === MediaServerType.EMBY
+        ? UserType.EMBY
+        : UserType.JELLYFIN;
+    user.jellyfinUserId = matchedUser.Id;
+    user.jellyfinUsername = matchedUser.Name;
+    user.jellyfinDeviceId = Buffer.from(
+      `BOT_seerr_${matchedUser.Name}`
+    ).toString('base64');
+    user.avatar = `/avatarproxy/${matchedUser.Id}`;
+
+    logger.info('Auto-linked OIDC user to existing Jellyfin account', {
+      label: 'Auth',
+      email: user.email,
+      jellyfinUsername: matchedUser.Name,
+    });
+  } catch (error) {
+    logger.error('Failed to auto-link OIDC user to Jellyfin account', {
+      label: 'Auth',
+      email: user.email,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
 }
 
 authRoutes.post('/jellyfin', async (req, res, next) => {
@@ -980,6 +1087,12 @@ authRoutes.post(
         plexToken: '',
         userType: UserType.LOCAL,
       });
+
+      // Optionally link this new account to a matching Jellyfin/Emby user so SSO
+      // users (who have no Jellyfin password) still get a Jellyfin association.
+      if (provider.autoLinkJellyfin) {
+        await tryAutoLinkJellyfinUser(user, fullUserInfo);
+      }
 
       const linkedAccount = new LinkedAccount({
         user,
