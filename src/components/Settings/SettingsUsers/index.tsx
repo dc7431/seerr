@@ -33,6 +33,9 @@ const messages = defineMessages('components.Settings.SettingsUsers', {
   mediaServerLoginTip:
     'Allow users to sign in using their {mediaServerName} account',
   atLeastOneAuth: 'At least one authentication method must be selected.',
+  hideLocalLoginUI: 'OIDC-Only Login Page',
+  hideLocalLoginUITip:
+    'Hide the local and {mediaServerName} sign-in forms from the login page, showing only OIDC providers. Sign-in methods stay enabled; the local form remains reachable at /login?direct=1 (break-glass) so you cannot be locked out.',
   newPlexLogin: 'Enable New {mediaServerName} Sign-In',
   newPlexLoginTip:
     'Allow {mediaServerName} users to sign in without first being imported',
@@ -109,6 +112,7 @@ const SettingsUsers = () => {
           initialValues={{
             localLogin: data?.localLogin,
             mediaServerLogin: data?.mediaServerLogin,
+            hideLocalLoginUI: data?.hideLocalLoginUI,
             newPlexLogin: data?.newPlexLogin,
             movieQuotaLimit: data?.defaultQuotas.movie.quotaLimit ?? 0,
             movieQuotaDays: data?.defaultQuotas.movie.quotaDays ?? 7,
@@ -123,6 +127,7 @@ const SettingsUsers = () => {
               await axios.post('/api/v1/settings/main', {
                 localLogin: values.localLogin,
                 mediaServerLogin: values.mediaServerLogin,
+                hideLocalLoginUI: values.hideLocalLoginUI,
                 newPlexLogin: values.newPlexLogin,
                 defaultQuotas: {
                   movie: {
@@ -218,6 +223,21 @@ const SettingsUsers = () => {
                           />
                         </div>
                       )}
+                      <LabeledCheckbox
+                        id="hideLocalLoginUI"
+                        className="mt-4"
+                        label={intl.formatMessage(messages.hideLocalLoginUI)}
+                        description={intl.formatMessage(
+                          messages.hideLocalLoginUITip,
+                          mediaServerFormatValues
+                        )}
+                        onChange={() =>
+                          setFieldValue(
+                            'hideLocalLoginUI',
+                            !values.hideLocalLoginUI
+                          )
+                        }
+                      />
                     </div>
                   </div>
                 </div>
