@@ -19,6 +19,7 @@ import { User } from '@server/entity/User';
 import PreparedEmail from '@server/lib/email';
 import { getSettings } from '@server/lib/settings';
 import { checkUser } from '@server/middleware/auth';
+import * as avatarproxy from '@server/routes/avatarproxy';
 import { setupTestDb } from '@server/test/db';
 import cookieParser from 'cookie-parser';
 import type { Express } from 'express';
@@ -868,6 +869,85 @@ describe('OpenID Connect', () => {
       assert.notStrictEqual(createdUser, null);
       assert.strictEqual(createdUser!.jellyfinUserId, null);
       assert.strictEqual(createdUser!.userType, UserType.LOCAL);
+    });
+  });
+
+  describe('Jellyfin auto-link avatar handling', function () {
+    const AVATAR_CLAIMS = {
+      sub: 'avatar-sub',
+      email: 'avatar@example.com',
+      preferred_username: 'jellyuser',
+      picture: 'https://idp.example.com/avatar.png',
+    };
+    const JELLYFIN_USER = {
+      Name: 'jellyuser',
+      Id: 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6',
+      ServerId: 'server-id',
+      ServerName: 'server-name',
+      Configuration: { GroupedFolders: [] },
+      Policy: { IsAdministrator: false },
+    };
+
+    before(async () => {
+      await setupFetchMock({
+        supportsPKCE: false,
+        idTokenClaims: AVATAR_CLAIMS,
+        userinfoResponse: AVATAR_CLAIMS,
+      });
+    });
+
+    after(() => {
+      fetchMock.hardReset();
+    });
+
+    function enableAutoLink() {
+      const settings = getSettings();
+      settings.main.mediaServerType = MediaServerType.JELLYFIN;
+      settings.jellyfin.apiKey = 'test-api-key';
+      settings.oidc.providers[0].newUserLogin = true;
+      settings.oidc.providers[0].autoLinkJellyfin = true;
+    }
+
+    it('uses the Jellyfin avatar when the linked account has one', async function (t) {
+      enableAutoLink();
+      t.mock.method(JellyfinAPI.prototype, 'getUsers', async () => ({
+        users: [JELLYFIN_USER],
+      }));
+      // Simulate the linked Jellyfin user having an avatar.
+      t.mock.method(avatarproxy, 'checkAvatarChanged', async (user: User) => {
+        user.avatarVersion = '123';
+        return { changed: true };
+      });
+
+      const response = await performOidcCallback();
+      assert.strictEqual(response.status, 204);
+
+      const createdUser = await getRepository(User).findOne({
+        where: { email: AVATAR_CLAIMS.email },
+      });
+      assert.strictEqual(
+        createdUser!.avatar,
+        `/avatarproxy/${JELLYFIN_USER.Id}?v=123`
+      );
+    });
+
+    it('falls back to the OIDC picture when Jellyfin has no avatar', async function (t) {
+      enableAutoLink();
+      t.mock.method(JellyfinAPI.prototype, 'getUsers', async () => ({
+        users: [JELLYFIN_USER],
+      }));
+      // Simulate the linked Jellyfin user having no avatar.
+      t.mock.method(avatarproxy, 'checkAvatarChanged', async () => ({
+        changed: false,
+      }));
+
+      const response = await performOidcCallback();
+      assert.strictEqual(response.status, 204);
+
+      const createdUser = await getRepository(User).findOne({
+        where: { email: AVATAR_CLAIMS.email },
+      });
+      assert.strictEqual(createdUser!.avatar, AVATAR_CLAIMS.picture);
     });
   });
 

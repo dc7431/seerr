@@ -1172,6 +1172,29 @@ authRoutes.post(
 
       user.linkedAccounts = [linkedAccount];
       await userRepository.save(user);
+
+      // If the account was auto-linked to a Jellyfin/Emby user, pull that user's
+      // Jellyfin avatar (served via the admin-authenticated avatar proxy) so SSO
+      // users get their real profile picture, mirroring the standard Jellyfin
+      // login. Falls back to the OIDC `picture` claim when Jellyfin has no
+      // avatar. Best-effort: never blocks the sign-up.
+      if (user.jellyfinUserId) {
+        try {
+          await checkAvatarChanged(user);
+          if (user.avatarVersion) {
+            user.avatar = getUserAvatarUrl(user);
+          } else if (fullUserInfo.picture) {
+            user.avatar = fullUserInfo.picture;
+          }
+          await userRepository.save(user);
+        } catch (error) {
+          logger.error('Failed to set Jellyfin avatar for auto-linked user', {
+            label: AUTO_LINK_LABEL,
+            email: user.email,
+            error: error instanceof Error ? error.message : 'Unknown error',
+          });
+        }
+      }
     }
 
     if (!user) {
