@@ -8,7 +8,7 @@ import { LinkedAccount } from '@server/entity/LinkedAccount';
 import { User } from '@server/entity/User';
 import { startJobs } from '@server/job/schedule';
 import { Permission } from '@server/lib/permissions';
-import { getSettings } from '@server/lib/settings';
+import { getSettings, type OidcProvider } from '@server/lib/settings';
 import logger from '@server/logger';
 import { isAuthenticated } from '@server/middleware/auth';
 import { checkAvatarChanged } from '@server/routes/avatarproxy';
@@ -227,6 +227,9 @@ function getUserAvatarUrl(user: User): string {
   return `/avatarproxy/${user.jellyfinUserId}?v=${user.avatarVersion}`;
 }
 
+// Consistent label so every auto-link decision can be grepped in the logs.
+const AUTO_LINK_LABEL = 'AutoLinkJellyfin';
+
 /**
  * Best-effort: link a freshly-created OIDC user to an existing Jellyfin/Emby
  * account by matching the OIDC `preferred_username` claim against the Jellyfin
@@ -237,12 +240,36 @@ function getUserAvatarUrl(user: User): string {
  * matching the standard non-admin Jellyfin login path). Any failure or absent
  * match leaves `user` untouched so the OIDC sign-up still succeeds as a local
  * account. See `matchJellyfinUser` for the (username-only) security model.
+ *
+ * This function is always invoked from the OIDC new-user path and logs its
+ * decision on every branch (under the `[AutoLinkJellyfin]` label) so the outcome
+ * is always visible in the container logs, even when it intentionally does
+ * nothing.
  */
 async function tryAutoLinkJellyfinUser(
   user: User,
-  fullUserInfo: openIdClient.IDToken & openIdClient.UserInfoResponse
+  fullUserInfo: openIdClient.IDToken & openIdClient.UserInfoResponse,
+  provider: OidcProvider
 ): Promise<void> {
   const settings = getSettings();
+  const preferredUsername = fullUserInfo.preferred_username;
+
+  if (!provider.autoLinkJellyfin) {
+    logger.debug('Auto-link disabled for this OIDC provider; skipping', {
+      label: AUTO_LINK_LABEL,
+      provider: provider.slug,
+      email: user.email,
+    });
+    return;
+  }
+
+  logger.info('Attempting Jellyfin auto-link for new OIDC user', {
+    label: AUTO_LINK_LABEL,
+    provider: provider.slug,
+    email: user.email,
+    preferredUsername: preferredUsername ?? null,
+    mediaServerType: settings.main.mediaServerType,
+  });
 
   // Only meaningful when the configured media server is Jellyfin/Emby, which is
   // also the only case where settings.jellyfin.apiKey is populated.
@@ -250,10 +277,19 @@ async function tryAutoLinkJellyfinUser(
     settings.main.mediaServerType !== MediaServerType.JELLYFIN &&
     settings.main.mediaServerType !== MediaServerType.EMBY
   ) {
+    logger.info('Skipping auto-link: media server is not Jellyfin/Emby', {
+      label: AUTO_LINK_LABEL,
+      email: user.email,
+      mediaServerType: settings.main.mediaServerType,
+    });
     return;
   }
 
   if (!settings.jellyfin.apiKey) {
+    logger.warn('Skipping auto-link: no Jellyfin admin API key is configured', {
+      label: AUTO_LINK_LABEL,
+      email: user.email,
+    });
     return;
   }
 
@@ -274,18 +310,49 @@ async function tryAutoLinkJellyfinUser(
 
     const { users } = await jellyfinClient.getUsers();
 
+    logger.info('Fetched Jellyfin users for auto-link matching', {
+      label: AUTO_LINK_LABEL,
+      email: user.email,
+      preferredUsername: preferredUsername ?? null,
+      jellyfinUserCount: users.length,
+      jellyfinUsernames: users.map((u) => u.Name),
+    });
+
     const match = matchJellyfinUser(users, {
-      preferredUsername: fullUserInfo.preferred_username,
+      preferredUsername,
       email: fullUserInfo.email,
     });
 
-    if (match.status !== 'matched') {
-      if (match.status === 'ambiguous') {
-        logger.warn(
-          'Skipped OIDC Jellyfin auto-link: multiple Jellyfin users matched the username',
-          { label: 'Auth', email: user.email, matches: match.count }
-        );
-      }
+    if (match.status === 'no-candidate') {
+      logger.warn(
+        'Skipping auto-link: OIDC profile has no preferred_username to match on (check the provider scopes include "profile")',
+        { label: AUTO_LINK_LABEL, email: user.email }
+      );
+      return;
+    }
+
+    if (match.status === 'no-match') {
+      logger.info(
+        'No Jellyfin user matched the OIDC preferred_username; leaving the account as a local user',
+        {
+          label: AUTO_LINK_LABEL,
+          email: user.email,
+          preferredUsername: preferredUsername ?? null,
+        }
+      );
+      return;
+    }
+
+    if (match.status === 'ambiguous') {
+      logger.warn(
+        'Skipping auto-link: multiple Jellyfin users matched the username',
+        {
+          label: AUTO_LINK_LABEL,
+          email: user.email,
+          preferredUsername: preferredUsername ?? null,
+          matches: match.count,
+        }
+      );
       return;
     }
 
@@ -298,11 +365,12 @@ async function tryAutoLinkJellyfinUser(
       })
     ) {
       logger.warn(
-        'Skipped OIDC Jellyfin auto-link: Jellyfin account is already linked to another Seerr user',
+        'Skipping auto-link: matched Jellyfin account is already linked to another Seerr user',
         {
-          label: 'Auth',
+          label: AUTO_LINK_LABEL,
           email: user.email,
           jellyfinUsername: matchedUser.Name,
+          jellyfinUserId: matchedUser.Id,
         }
       );
       return;
@@ -320,13 +388,14 @@ async function tryAutoLinkJellyfinUser(
     user.avatar = `/avatarproxy/${matchedUser.Id}`;
 
     logger.info('Auto-linked OIDC user to existing Jellyfin account', {
-      label: 'Auth',
+      label: AUTO_LINK_LABEL,
       email: user.email,
       jellyfinUsername: matchedUser.Name,
+      jellyfinUserId: matchedUser.Id,
     });
   } catch (error) {
     logger.error('Failed to auto-link OIDC user to Jellyfin account', {
-      label: 'Auth',
+      label: AUTO_LINK_LABEL,
       email: user.email,
       error: error instanceof Error ? error.message : 'Unknown error',
     });
@@ -1090,9 +1159,9 @@ authRoutes.post(
 
       // Optionally link this new account to a matching Jellyfin/Emby user so SSO
       // users (who have no Jellyfin password) still get a Jellyfin association.
-      if (provider.autoLinkJellyfin) {
-        await tryAutoLinkJellyfinUser(user, fullUserInfo);
-      }
+      // Always invoked; the function itself logs its decision (including when the
+      // setting is disabled) so the outcome is always visible in the logs.
+      await tryAutoLinkJellyfinUser(user, fullUserInfo, provider);
 
       const linkedAccount = new LinkedAccount({
         user,
