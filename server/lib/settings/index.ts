@@ -167,6 +167,14 @@ export interface MainSettings {
   localLogin: boolean;
   mediaServerLogin: boolean;
   oidcLogin: boolean;
+  /**
+   * Hide the local (email/password) and media-server sign-in forms from the
+   * default login page, showing only OIDC providers, for a clean SSO-only UX.
+   * This is purely presentational: the backend auth endpoints stay enabled and
+   * remain reachable via the `?direct=1` break-glass query param, so it can
+   * never cause a lockout.
+   */
+  hideLocalLoginUI: boolean;
   newPlexLogin: boolean;
   discoverRegion: string;
   streamingRegion: string;
@@ -219,6 +227,7 @@ interface FullPublicSettings extends PublicSettings {
   hideBlocklisted: boolean;
   localLogin: boolean;
   mediaServerLogin: boolean;
+  hideLocalLoginUI: boolean;
   movie4kEnabled: boolean;
   series4kEnabled: boolean;
   discoverRegion: string;
@@ -510,6 +519,7 @@ class Settings {
       hideBlocklisted: this.data.main.hideBlocklisted,
       localLogin: this.data.main.localLogin,
       mediaServerLogin: this.data.main.mediaServerLogin,
+      hideLocalLoginUI: this.data.main.hideLocalLoginUI,
       jellyfinExternalHost: this.data.jellyfin.externalHostname,
       jellyfinForgotPasswordUrl: this.data.jellyfin.jellyfinForgotPasswordUrl,
       movie4kEnabled: this.data.radarr.some(
@@ -723,6 +733,7 @@ class Settings {
         localLogin: true,
         mediaServerLogin: true,
         oidcLogin: false,
+        hideLocalLoginUI: false,
         newPlexLogin: true,
         discoverRegion: '',
         streamingRegion: '',
