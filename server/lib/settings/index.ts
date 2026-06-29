@@ -71,6 +71,23 @@ export type OidcProvider = {
   requiredClaims?: string;
   scopes?: string;
   newUserLogin?: boolean;
+  /**
+   * When enabled, a Seerr account newly created via this OIDC provider is
+   * automatically linked to an existing Jellyfin/Emby user whose account name
+   * matches the OIDC `preferred_username` claim (case-insensitive). The link is
+   * populated server-side using Seerr's stored admin Jellyfin API key — no
+   * Jellyfin password or interactive flow is required.
+   *
+   * SECURITY: matching is by username only, because Jellyfin does not expose
+   * email addresses via its API. Only enable this when a single identity
+   * provider authoritatively provisions BOTH the Jellyfin and OIDC usernames
+   * (e.g. the same SSO/OIDC provider creates both accounts). Otherwise a user
+   * able to choose their OIDC `preferred_username` could be linked to an
+   * unrelated Jellyfin account (impersonation). Seerr still refuses to link
+   * unless exactly one Jellyfin user matches and that account is not already
+   * linked to another Seerr user.
+   */
+  autoLinkJellyfin?: boolean;
 };
 
 export type PublicOidcProvider = Pick<OidcProvider, 'slug' | 'name' | 'logo'>;
