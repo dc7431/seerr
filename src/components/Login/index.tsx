@@ -2,6 +2,7 @@ import EmbyLogo from '@app/assets/services/emby-icon-only.svg';
 import JellyfinLogo from '@app/assets/services/jellyfin-icon.svg';
 import PlexLogo from '@app/assets/services/plex.svg';
 import ButtonWithLoader from '@app/components/Common/ButtonWithLoader';
+import ErrorBoundary from '@app/components/Common/ErrorBoundary';
 import ImageFader from '@app/components/Common/ImageFader';
 import PageTitle from '@app/components/Common/PageTitle';
 import LanguagePicker from '@app/components/Layout/LanguagePicker';
@@ -30,6 +31,7 @@ const messages = defineMessages('components.Login', {
   signinwithjellyfin: 'Use your {mediaServerName} account',
   signinwithoverseerr: 'Use your {applicationTitle} account',
   orsigninwith: 'Or sign in with',
+  uselocalaccount: 'Use a local account',
 });
 
 const Login = () => {
@@ -107,54 +109,81 @@ const Login = () => {
   const localLoginRef = useRef<HTMLDivElement>(null);
   const loginRef = mediaServerLogin ? mediaServerLoginRef : localLoginRef;
 
+  // Break-glass: `?direct=1` always reveals the local/media-server sign-in forms
+  // (mirrors Nextcloud's `?direct=1`), so an admin can never be locked out if
+  // OIDC is down. Accept the param whether it arrives as a string or array.
+  const directParam = router.query.direct;
+  const breakGlass = Array.isArray(directParam)
+    ? directParam.includes('1')
+    : directParam === '1';
+
+  // Only hide the non-OIDC forms when OIDC is actually available and break-glass
+  // is not requested, so the default login page can never end up empty.
+  const oidcOnly =
+    settings.currentSettings.hideLocalLoginUI &&
+    settings.currentSettings.openIdProviders.length > 0 &&
+    !breakGlass;
+
   const loginFormVisible =
-    (isJellyfin && settings.currentSettings.mediaServerLogin) ||
-    settings.currentSettings.localLogin;
-  const additionalLoginOptions = [
+    !oidcOnly &&
+    ((isJellyfin && settings.currentSettings.mediaServerLogin) ||
+      settings.currentSettings.localLogin);
+
+  const mediaServerLoginOption =
+    !oidcOnly &&
     settings.currentSettings.mediaServerLogin &&
-      (settings.currentSettings.mediaServerType === MediaServerType.PLEX ? (
-        <PlexLoginButton
-          key="plex"
-          isProcessing={isProcessing}
-          onAuthToken={(authToken) => setAuthToken(authToken)}
-          large={!isJellyfin && !settings.currentSettings.localLogin}
-        />
+    (settings.currentSettings.mediaServerType === MediaServerType.PLEX ? (
+      <PlexLoginButton
+        key="plex"
+        isProcessing={isProcessing}
+        onAuthToken={(authToken) => setAuthToken(authToken)}
+        large={!isJellyfin && !settings.currentSettings.localLogin}
+      />
+    ) : (
+      settings.currentSettings.localLogin &&
+      (mediaServerLogin ? (
+        <ButtonWithLoader
+          key="seerr"
+          data-testid="seerr-login-button"
+          className="min-w-0 flex-grow"
+          onClick={() => setMediaServerLogin(false)}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/os_icon.svg"
+            alt={settings.currentSettings.applicationTitle}
+            className="mr-2 h-5"
+          />
+          <span>{settings.currentSettings.applicationTitle}</span>
+        </ButtonWithLoader>
       ) : (
-        settings.currentSettings.localLogin &&
-        (mediaServerLogin ? (
-          <ButtonWithLoader
-            key="seerr"
-            data-testid="seerr-login-button"
-            className="min-w-0 flex-grow"
-            onClick={() => setMediaServerLogin(false)}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/os_icon.svg"
-              alt={settings.currentSettings.applicationTitle}
-              className="mr-2 h-5"
-            />
-            <span>{settings.currentSettings.applicationTitle}</span>
-          </ButtonWithLoader>
-        ) : (
-          <ButtonWithLoader
-            key="mediaserver"
-            data-testid="mediaserver-login-button"
-            className="min-w-0 flex-grow"
-            onClick={() => setMediaServerLogin(true)}
-          >
-            <MediaServerLogo />
-            <span>{mediaServerName}</span>
-          </ButtonWithLoader>
-        ))
-      )),
-    ...settings.currentSettings.openIdProviders.map((provider) => (
+        <ButtonWithLoader
+          key="mediaserver"
+          data-testid="mediaserver-login-button"
+          className="min-w-0 flex-grow"
+          onClick={() => setMediaServerLogin(true)}
+        >
+          <MediaServerLogo />
+          <span>{mediaServerName}</span>
+        </ButtonWithLoader>
+      ))
+    ));
+
+  // OIDC buttons are isolated in an error boundary at render time so a failure
+  // here can never crash the local form or the recovery link.
+  const oidcLoginOptions = settings.currentSettings.openIdProviders.map(
+    (provider) => (
       <OidcLoginButton
         key={provider.slug}
         provider={provider}
         onError={setError}
       />
-    )),
+    )
+  );
+
+  const additionalLoginOptions = [
+    mediaServerLoginOption,
+    ...oidcLoginOptions,
   ].filter((o): o is JSX.Element => !!o);
 
   return (
@@ -262,8 +291,23 @@ const Login = () => {
                   !loginFormVisible ? 'flex-col' : ''
                 }`}
               >
-                {additionalLoginOptions}
+                {mediaServerLoginOption}
+                <ErrorBoundary>{oidcLoginOptions}</ErrorBoundary>
               </div>
+
+              {/* Break-glass recovery: always rendered on the OIDC-only page,
+                  outside the error boundary, so the local sign-in path is always
+                  reachable even if every OIDC button fails. */}
+              {oidcOnly && (
+                <div className="mt-6 text-center">
+                  <a
+                    href="?direct=1"
+                    className="text-sm text-gray-400 underline transition hover:text-gray-200"
+                  >
+                    {intl.formatMessage(messages.uselocalaccount)}
+                  </a>
+                </div>
+              )}
             </div>
           </>
         </div>
