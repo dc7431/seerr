@@ -32,6 +32,7 @@ export interface PublicSettingsResponse {
   applicationUrl: string;
   hideAvailable: boolean;
   hideBlocklisted: boolean;
+  hideRequested: boolean;
   localLogin: boolean;
   mediaServerLogin: boolean;
   hideLocalLoginUI: boolean;
@@ -50,6 +51,7 @@ export interface PublicSettingsResponse {
   emailEnabled: boolean;
   newPlexLogin: boolean;
   youtubeUrl: string;
+  versionCheck: boolean;
   plexClientIdentifier: string;
   openIdProviders: PublicOidcProvider[];
 }
@@ -78,7 +80,7 @@ export interface CacheResponse {
 export interface StatusResponse {
   version: string;
   commitTag: string;
-  updateAvailable: boolean;
-  commitsBehind: number;
+  updateAvailable?: boolean;
+  commitsBehind?: number;
   restartRequired: boolean;
 }

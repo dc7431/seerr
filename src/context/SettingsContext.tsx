@@ -14,6 +14,7 @@ const defaultSettings: PublicSettingsResponse = {
   applicationUrl: '',
   hideAvailable: false,
   hideBlocklisted: false,
+  hideRequested: false,
   localLogin: true,
   mediaServerLogin: true,
   hideLocalLoginUI: false,
@@ -32,6 +33,7 @@ const defaultSettings: PublicSettingsResponse = {
   emailEnabled: false,
   newPlexLogin: true,
   youtubeUrl: '',
+  versionCheck: true,
   plexClientIdentifier: '',
   openIdProviders: [],
 };

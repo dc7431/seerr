@@ -5,6 +5,7 @@ export enum ApiErrorCode {
   InvalidEmail = 'INVALID_EMAIL',
   NotAdmin = 'NOT_ADMIN',
   NoAdminUser = 'NO_ADMIN_USER',
+  ConnectionError = 'CONNECTION_ERROR',
   OidcProviderDiscoveryFailed = 'OIDC_PROVIDER_DISCOVERY_FAILED',
   OidcAuthorizationFailed = 'OIDC_AUTHORIZATION_FAILED',
   OidcMissingEmail = 'OIDC_MISSING_EMAIL',

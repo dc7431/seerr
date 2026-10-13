@@ -181,6 +181,7 @@ export interface MainSettings {
   };
   hideAvailable: boolean;
   hideBlocklisted: boolean;
+  hideRequested: boolean;
   localLogin: boolean;
   mediaServerLogin: boolean;
   oidcLogin: boolean;
@@ -205,6 +206,7 @@ export interface MainSettings {
   enableSpecialEpisodes: boolean;
   locale: string;
   youtubeUrl: string;
+  versionCheck: boolean;
 }
 
 export interface ProxySettings {
@@ -242,6 +244,7 @@ interface FullPublicSettings extends PublicSettings {
   applicationUrl: string;
   hideAvailable: boolean;
   hideBlocklisted: boolean;
+  hideRequested: boolean;
   localLogin: boolean;
   mediaServerLogin: boolean;
   hideLocalLoginUI: boolean;
@@ -264,6 +267,7 @@ interface FullPublicSettings extends PublicSettings {
   userEmailRequired: boolean;
   newPlexLogin: boolean;
   youtubeUrl: string;
+  versionCheck: boolean;
   plexClientIdentifier: string;
   openIdProviders: PublicOidcProvider[];
 }
@@ -280,6 +284,7 @@ export interface NotificationAgentDiscord extends NotificationAgentConfig {
     botAvatarUrl?: string;
     webhookUrl: string;
     webhookRoleId?: string;
+    webhookThreadId?: string;
     enableMentions: boolean;
     locale: AvailableLocale;
     useUserLocale: boolean;
@@ -360,6 +365,7 @@ export interface NotificationAgentNtfy extends NotificationAgentConfig {
   options: {
     url: string;
     topic: string;
+    tags?: string;
     authMethodUsernamePassword?: boolean;
     username?: string;
     password?: string;
@@ -534,6 +540,7 @@ class Settings {
       applicationUrl: this.data.main.applicationUrl,
       hideAvailable: this.data.main.hideAvailable,
       hideBlocklisted: this.data.main.hideBlocklisted,
+      hideRequested: this.data.main.hideRequested,
       localLogin: this.data.main.localLogin,
       mediaServerLogin: this.data.main.mediaServerLogin,
       hideLocalLoginUI: this.data.main.hideLocalLoginUI,
@@ -560,6 +567,7 @@ class Settings {
         this.data.notifications.agents.email.options.userEmailRequired,
       newPlexLogin: this.data.main.newPlexLogin,
       youtubeUrl: this.data.main.youtubeUrl,
+      versionCheck: this.data.main.versionCheck,
       plexClientIdentifier: this.data.clientId,
       openIdProviders: this.data.main.oidcLogin
         ? this.data.oidc.providers.map((p) => ({
@@ -747,6 +755,7 @@ class Settings {
         },
         hideAvailable: false,
         hideBlocklisted: false,
+        hideRequested: false,
         localLogin: true,
         mediaServerLogin: true,
         oidcLogin: false,
@@ -764,6 +773,7 @@ class Settings {
         enableSpecialEpisodes: false,
         locale: 'en',
         youtubeUrl: '',
+        versionCheck: true,
       },
       plex: {
         name: '',
@@ -898,6 +908,7 @@ class Settings {
             options: {
               url: '',
               topic: '',
+              tags: '',
               priority: 3,
               locale: 'en',
             },
